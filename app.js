@@ -204,7 +204,7 @@ function renderList() {
 function openMenu() {
   const m = document.createElement("div"); m.className = "modal";
   m.innerHTML = '<div class="box"><h3 style="margin-top:0">メニュー</h3><p class="muted" style="font-size:13px">ログイン中：' + esc(user.email || "") + '</p>' +
-    '<div style="display:flex;flex-direction:column;gap:8px"><button class="btn" id="mexp">バックアップを書き出す（画像込み）</button><button class="btn" id="mimp">バックアップを読み込む</button><button class="btn danger" id="mout">ログアウト</button><button class="btn" id="mcl">閉じる</button></div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px"><button class="btn" id="mexp">バックアップを書き出す（画像込み）</button><button class="btn" id="mimp">バックアップを読み込む</button><button class="btn" id="mupd">アプリを最新版にする</button><button class="btn danger" id="mout">ログアウト</button><button class="btn" id="mcl">閉じる</button></div>' +
     '<input type="file" id="mfile" accept=".json,application/json" hidden></div>';
   document.body.appendChild(m);
   m.onclick = ev => { if (ev.target === m) m.remove(); };
@@ -213,6 +213,7 @@ function openMenu() {
   const f = m.querySelector("#mfile");
   m.querySelector("#mimp").onclick = () => f.click();
   f.onchange = () => { if (f.files[0]) importData(f.files[0]); m.remove(); };
+  m.querySelector("#mupd").onclick = () => { m.remove(); forceUpdate(); };
   m.querySelector("#mout").onclick = () => { m.remove(); confirmBox("ログアウトしますか？（オフラインでは再ログインできません）", () => signOut(auth), "ログアウト"); };
 }
 
@@ -372,6 +373,20 @@ function confirmBox(msg, ok, label) {
   document.body.appendChild(m); m.querySelector("#cn").onclick = () => m.remove(); m.querySelector("#ok").onclick = () => { m.remove(); ok(); };
 }
 
+/* ---------- 最新版に更新 ---------- */
+// アプリ本体のキャッシュだけを消して読み直す（登山データは消えない）
+async function forceUpdate() {
+  if (!navigator.onLine) { toast("電波のある場所で行ってください"); return; }
+  toast("最新版を読み込んでいます…", 5000);
+  try {
+    if ("caches" in window) { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))); }
+    if (navigator.serviceWorker) { const regs = await navigator.serviceWorker.getRegistrations(); await Promise.all(regs.map(r => r.unregister())); }
+  } catch (e) {}
+  // ブラウザ側のキャッシュも新しいファイルで上書きしておく
+  try { await Promise.all(["./", "./index.html", "./app.js", "./style.css", "./sw.js", "./firebase-config.js", "./vendor/firebase.js"].map(f => fetch(f, { cache: "reload" }))); } catch (e) {}
+  location.replace(location.pathname + "?v=" + Date.now() + location.hash);
+}
+
 /* ---------- backup ---------- */
 function exportData() {
   const used = new Set(); routes.forEach(r => refsOf(r).forEach(i => used.add(i)));
@@ -423,4 +438,9 @@ if (configured) {
   });
 } else route();
 
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(() => {});
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).then(reg => {
+    // アプリに戻ってきたときにも更新を確認する（スマホはアプリを閉じないことが多いため）
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update().catch(() => {}); });
+  }).catch(() => {});
+}
