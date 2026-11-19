@@ -128,3 +128,40 @@ header.top h1 svg{width:28px;height:28px}
 .status.off{background:#fff0e0;color:#a5541c}
 .status.pend{background:#fff7e6;color:#8a6a10}
 body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+
+a.stat.maplink{display:block;text-decoration:none;color:inherit;border:1px solid #cfe0d4}
+a.stat.maplink:hover{border-color:var(--green)}
+a.stat.maplink .v{color:var(--green);text-decoration:underline;text-underline-offset:3px}
+.mapgo{color:var(--green);font-weight:700}
+
+/* 並べ方の切り替え */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+.seg button{border:none;background:none;padding:8px 11px;cursor:pointer;font-size:13px;color:var(--sub)}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--green);color:#fff}
+.grid.c1{grid-template-columns:1fr}
+.grid.c2{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.grid.c3{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+@media (min-width:900px){.grid.c2{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}.grid.c3{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}}
+.grid.c2 .card .body{padding:8px 10px 10px}
+.grid.c2 .card .mt{font-size:14px}
+.grid.c2 .card .rt{font-size:12px;margin-bottom:6px}
+.grid.c2 .card .rt .muted{display:none}
+.grid.c2 .chips{font-size:11px;gap:4px}
+.grid.c2 .chip{padding:1px 7px}
+.grid.c3 .card .body{padding:6px 8px 8px}
+.grid.c3 .card .mt{font-size:13px;line-height:1.35}
+.grid.c3 .card .rt{font-size:11px;margin-bottom:0;line-height:1.35}
+.grid.c3 .card .rt .muted,.grid.c3 .chips{display:none}
+.grid.c3 .thumb{aspect-ratio:1/1}
+.grid.c2 .lv,.grid.c2 .done,.grid.c3 .lv,.grid.c3 .done{font-size:10px;padding:1px 6px}
+.grid.c2 .badge-on,.grid.c3 .badge-on{top:5px;left:5px}
+.grid.c2 .done,.grid.c3 .done{top:5px;right:5px}
+.grid.c3 .badge-on{top:auto;bottom:5px}
+@media (max-width:560px){
+  .toolbar input{flex-basis:100%}
+  .toolbar select{flex:1 1 30%;min-width:0;padding:8px 6px;font-size:13px}
+  .seg{flex-basis:100%}
+  .seg button{flex:1}
+}
+.grid.c3 .done .dl{display:none}

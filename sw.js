@@ -1,6 +1,6 @@
 // アプリ本体をキャッシュして、圏外でも起動できるようにする
 // ファイルを更新したら VERSION の数字を上げてください
-const VERSION = "v1";
+const VERSION = "v3";
 const CACHE = "yama-route-book-" + VERSION;
 const FILES = [
   "./", "./index.html", "./style.css", "./app.js", "./firebase-config.js",

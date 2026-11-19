@@ -25,7 +25,7 @@ if (configured) {
 }
 
 /* ---------- ui state ---------- */
-let ui = { q: "", lv: "", sort: "mountain", done: "" };
+let ui = { q: "", lv: "", sort: "mountain", done: "", cols: "auto" };
 try { const s = JSON.parse(localStorage.getItem("yama-ui") || "null"); if (s) ui = Object.assign(ui, s); } catch (e) {}
 function persistUi() { try { localStorage.setItem("yama-ui", JSON.stringify(ui)); } catch (e) {} }
 
@@ -38,6 +38,14 @@ function climbsOf(r) { return (r.climbs || []).slice().sort((a, b) => a.date < b
 function fmtDate(d) { if (!d) return ""; const p = d.split("-"); return p.length === 3 ? p[0] + "/" + (+p[1]) + "/" + (+p[2]) : d; }
 function today() { const t = new Date(); t.setMinutes(t.getMinutes() - t.getTimezoneOffset()); return t.toISOString().slice(0, 10); }
 function mountainTotal(name) { let n = 0; routes.forEach(r => { if ((r.mountain || "") === name) n += (r.climbs || []).length; }); return n; }
+// 駐車場のGoogleマップ：URLが入っていればそれを、なければ駐車場名＋エリアで検索
+function mapsUrl(r) {
+  const u = String(r.parkingMap || "").trim();
+  if (u) return safeUrl(u);
+  if (!String(r.parking || "").trim()) return "";
+  const q = [r.parking, (r.area || "").split(/[／\/]/)[0]].filter(Boolean).join(" ");
+  return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
+}
 function find(id) { return routes.find(r => r.id === id) || null; }
 let pendingImgs = {}; // images created in the open form, not yet written
 function imgSrc(id) { return id ? (pendingImgs[id] || images[id] || "") : ""; }
@@ -139,6 +147,7 @@ function summaryHtml() {
   if (!routes.length) return "";
   return '<div class="summary"><div class="s"><b>' + total + '</b>回 登頂</div><div class="s"><b>' + Object.keys(mts).length + '</b>山 登頂済み</div><div class="s"><b>' + routesDone + '</b>/' + routes.length + ' ルート踏破</div></div>';
 }
+function gridCls() { return "grid" + (ui.cols === "auto" ? "" : " c" + ui.cols); }
 function lvBadge(l) { return l ? '<span class="lv ' + (LVCLS[l] || "lv0") + '">' + esc(l) + '</span>' : ""; }
 function shortTime(t) { t = String(t); return t.length > 22 ? t.slice(0, 22) + "…" : t; }
 function card(r) {
@@ -148,7 +157,7 @@ function card(r) {
   const cl = climbsOf(r); if (cl.length) chips.push('<span class="chip">最終 ' + esc(fmtDate(cl[0].date)) + '</span>');
   const t = imgSrc(r.thumb);
   return '<button class="card" data-id="' + esc(r.id) + '"><div class="thumb">' + (t ? '<img loading="lazy" src="' + t + '" alt="">' : '<div class="ph">' + MTN + '</div>') +
-    (r.level ? '<span class="badge-on">' + lvBadge(r.level) + '</span>' : '') + (cl.length ? '<span class="done">✓ 登頂 ' + cl.length + '回</span>' : '') + '</div>' +
+    (r.level ? '<span class="badge-on">' + lvBadge(r.level) + '</span>' : '') + (cl.length ? '<span class="done">✓<span class="dl"> 登頂</span> ' + cl.length + '<span class="dl">回</span></span>' : '') + '</div>' +
     '<div class="body"><div class="mt">' + esc(r.mountain || "（山名なし）") + '</div><div class="rt">' + esc(r.route || "") + (r.area ? '　<span class="muted">' + esc(r.area) + '</span>' : '') + '</div><div class="chips">' + chips.join("") + '</div></div></button>';
 }
 function renderList() {
@@ -169,23 +178,25 @@ function renderList() {
   let html = '<header class="top"><h1>' + LOGO + '山ルート帳</h1>' + statusHtml() + '<div class="spacer"></div>' +
     '<button class="btn small" id="menu">⋯</button><button class="btn primary" id="add">＋ ルートを追加</button></header>' +
     '<div class="toolbar"><input id="q" type="search" placeholder="山名・ルート名・エリアで検索" value="' + esc(ui.q) + '">' +
-    '<select id="lv"><option value="">難易度：すべて</option>' + LEVELS.map(l => '<option' + sel("lv", l) + '>' + l + '</option>').join("") + '</select>' +
+    '<select id="lv"><option value="">難易度</option>' + LEVELS.map(l => '<option' + sel("lv", l) + '>' + l + '</option>').join("") + '</select>' +
     '<select id="sort"><option value="mountain"' + sel("sort", "mountain") + '>山の名前順</option><option value="level"' + sel("sort", "level") + '>難易度順</option><option value="climbs"' + sel("sort", "climbs") + '>登頂回数が多い順</option><option value="updated"' + sel("sort", "updated") + '>更新が新しい順</option></select>' +
-    '<select id="done"><option value="">登頂：すべて</option><option value="done"' + sel("done", "done") + '>登頂済み</option><option value="not"' + sel("done", "not") + '>未登頂</option></select></div>' +
+    '<select id="done"><option value="">登頂状況</option><option value="done"' + sel("done", "done") + '>登頂済み</option><option value="not"' + sel("done", "not") + '>未登頂</option></select>' +
+    '<div class="seg" role="group" aria-label="並べ方">' + [["auto", "自動"], ["1", "1列"], ["2", "2列"], ["3", "3列"]].map(c => '<button type="button" data-cols="' + c[0] + '" class="' + (ui.cols === c[0] ? "on" : "") + '">' + c[1] + '</button>').join("") + '</div></div>' +
     summaryHtml() + '<div class="count">' + list.length + ' 件</div>';
   if (!routes.length) html += '<div class="empty">まだルートがありません。<br>「＋ ルートを追加」から登録しましょう。</div>';
   else if (!list.length) html += '<div class="empty">条件に合うルートがありません。</div>';
-  else if (ui.sort === "mountain" || ui.sort === "climbs") {
+  else if ((ui.sort === "mountain" || ui.sort === "climbs") && (ui.cols === "auto" || ui.cols === "1")) {
     const groups = {}, order = [];
     list.forEach(r => { const k = r.mountain || "（山名なし）"; if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(r); });
-    order.forEach(k => { const t = mountainTotal(k); html += '<div class="group-title">' + esc(k) + '　' + groups[k].length + 'ルート' + (t ? '<span class="gcount">⛰ 登頂 ' + t + '回</span>' : '') + '</div><div class="grid">' + groups[k].map(card).join("") + '</div>'; });
-  } else html += '<div class="grid">' + list.map(card).join("") + '</div>';
+    order.forEach(k => { const t = mountainTotal(k); html += '<div class="group-title">' + esc(k) + '　' + groups[k].length + 'ルート' + (t ? '<span class="gcount">⛰ 登頂 ' + t + '回</span>' : '') + '</div><div class="' + gridCls() + '">' + groups[k].map(card).join("") + '</div>'; });
+  } else html += '<div class="' + gridCls() + '">' + list.map(card).join("") + '</div>';
   app.innerHTML = html;
   const qi = document.getElementById("q");
   qi.addEventListener("input", () => { ui.q = qi.value; persistUi(); const pos = qi.selectionStart; renderList(); const n = document.getElementById("q"); n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} });
   document.getElementById("lv").onchange = e => { ui.lv = e.target.value; persistUi(); renderList(); };
   document.getElementById("sort").onchange = e => { ui.sort = e.target.value; persistUi(); renderList(); };
   document.getElementById("done").onchange = e => { ui.done = e.target.value; persistUi(); renderList(); };
+  app.querySelectorAll("[data-cols]").forEach(b => { b.onclick = () => { ui.cols = b.dataset.cols; persistUi(); renderList(); }; });
   document.getElementById("add").onclick = () => go("new");
   document.getElementById("menu").onclick = openMenu;
   app.querySelectorAll(".card").forEach(c => { c.onclick = () => go("r-" + c.dataset.id); });
@@ -213,12 +224,17 @@ function renderDetail(r) {
   lbList = []; if (r.thumb) lbList.push(imgSrc(r.thumb)); maps.forEach(m => lbList.push(imgSrc(m.img)));
   const stat = (k, v, unit) => '<div class="stat"><div class="k">' + k + '</div><div class="v">' + (v ? esc(v) + (unit || "") : '<span class="muted">—</span>') + '</div></div>';
   const t = imgSrc(r.thumb);
+  const parkingStat = r => {
+    const url = mapsUrl(r);
+    if (!url) return stat("駐車場", r.parking);
+    return '<a class="stat maplink" href="' + esc(url) + '" target="_blank" rel="noopener"><div class="k">駐車場　<span class="mapgo">📍 地図で開く</span></div><div class="v">' + (r.parking ? esc(r.parking) : '地図を見る') + '</div></a>';
+  };
   let html = '<div class="back" style="display:flex;gap:8px;align-items:center"><button class="btn small" id="back">← 一覧へ</button>' + statusHtml() + '</div>' +
     '<div class="hero">' + (t ? '<img id="heroimg" src="' + t + '" alt="">' : '<div class="ph">' + MTN + '</div>') + '</div>' +
     '<div class="dhead"><div><h2>' + esc(r.mountain || "（山名なし）") + '</h2><div class="rt">' + esc(r.route || "") + '</div></div><div class="spacer"></div>' + lvBadge(r.level) +
     '<button class="btn small" id="edit">✎ 編集</button></div>' +
     (r.area ? '<div class="muted">📍 ' + esc(r.area) + '</div>' : '') +
-    '<div class="stats">' + stat("難易度", r.level) + stat("所要時間", r.time) + stat("距離", r.distance, " km") + (r.elevation ? stat("標高差・累積標高", r.elevation) : "") + stat("駐車場", r.parking) + stat("駐車料金", r.parkingFee) + '</div>';
+    '<div class="stats">' + stat("難易度", r.level) + stat("所要時間", r.time) + stat("距離", r.distance, " km") + (r.elevation ? stat("標高差・累積標高", r.elevation) : "") + parkingStat(r) + stat("駐車料金", r.parkingFee) + '</div>';
   const cl = climbsOf(r), mt = mountainTotal(r.mountain || "");
   html += '<div class="sec"><h3>⛰ 登頂記録<span class="bigcount">このルート <b>' + cl.length + '</b>回' + (mt !== cl.length ? '　／　' + esc(r.mountain) + ' 合計 <b>' + mt + '</b>回' : '') + '</span></h3>' +
     (cl.length ? '<ul class="climbs">' + cl.map((c, i) => '<li><span class="n">' + (cl.length - i) + '回目</span><span class="d">' + esc(fmtDate(c.date)) + '</span><span class="m">' + esc(c.memo || "") + '</span><button class="x" data-cid="' + esc(c.id) + '" aria-label="削除">×</button></li>').join("") + '</ul>' : '<div class="muted">まだ登頂記録がありません</div>') +
@@ -259,7 +275,7 @@ function openLb(i) {
 /* ---------- form ---------- */
 function renderForm(orig) {
   pendingImgs = {};
-  const r = orig ? JSON.parse(JSON.stringify(orig)) : { id: uid(), mountain: "", route: "", area: "", level: "", time: "", distance: "", elevation: "", parking: "", parkingFee: "", urls: [], caution: "", memo: "", thumb: null, maps: [], climbs: [] };
+  const r = orig ? JSON.parse(JSON.stringify(orig)) : { id: uid(), mountain: "", route: "", area: "", level: "", time: "", distance: "", elevation: "", parking: "", parkingMap: "", parkingFee: "", urls: [], caution: "", memo: "", thumb: null, maps: [], climbs: [] };
   if (!r.urls || !r.urls.length) r.urls = [{ label: "", url: "" }];
   if (!r.maps) r.maps = [];
   const mountains = [...new Set(routes.map(x => x.mountain).filter(Boolean))];
@@ -273,6 +289,7 @@ function renderForm(orig) {
     '<div class="f"><label>難易度</label><select data-k="level"><option value="">—</option>' + LEVELS.map(l => '<option' + (r.level === l ? " selected" : "") + '>' + l + '</option>').join("") + '</select></div></div>' +
     '<div class="row">' + inp("time", "所要時間", "例：上り 1:30 / 下り 1:00") + inp("distance", "距離（km）", "例：5.6", "number") + inp("elevation", "標高差・累積標高（任意）", "例：+600m") + '</div>' +
     '<div class="row">' + inp("parking", "駐車場", "例：登山口近くの有料駐車場") + inp("parkingFee", "駐車料金", "例：1日 600円") + '</div>' +
+    '<div class="f"><label>駐車場のGoogleマップURL（任意）</label><input data-k="parkingMap" type="url" value="' + esc(r.parkingMap) + '" placeholder="Googleマップの「共有」でコピーしたURL（例：https://maps.app.goo.gl/...）"><div class="muted" style="font-size:12px">空欄なら、駐車場名とエリアでGoogleマップを検索して開きます。場所をピッタリ指定したいときに貼ってください。</div></div>' +
     '<div class="f"><label>サムネイル画像</label><div class="thumbedit" id="thumbbox"></div></div>' +
     '<div class="f"><label>地図・写真（複数可）</label><div class="imgs" id="mapbox"></div><div class="drop" id="mapdrop" style="margin-top:8px">ここをタップ／画像をドロップして追加（スクショもOK）</div><input type="file" id="mapfile" accept="image/*" multiple hidden></div>' +
     '<div class="f"><label>参考URL（サイト・YouTubeなど）</label><div id="urlbox"></div><button class="btn small" id="addurl" type="button" style="align-self:flex-start">＋ URLを追加</button></div>' +
