@@ -1,6 +1,6 @@
 // アプリ本体をキャッシュして、圏外でも起動できるようにする
 // ファイルを更新したら VERSION の数字を上げてください
-const VERSION = "v6";
+const VERSION = "v7";
 const CACHE = "yama-route-book-" + VERSION;
 const TILE_CACHE = "yama-tiles"; // 保存した地図（バージョンを上げても消さない）
 const TILE_HOST = "cyberjapandata.gsi.go.jp";

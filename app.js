@@ -100,11 +100,12 @@ function route() {
   if (mm) { const r = find(mm[1]); if (r) { if (!mapState || mapState.r.id !== r.id) renderMap(r); return; } }
   cleanupMap();
   if (h === "new") return renderForm(null);
+  let cm = h.match(/^copy-(.+)$/); if (cm) { const src = find(cm[1]); if (src) return renderForm(null, src); }
   let m = h.match(/^edit-(.+)$/); if (m) return renderForm(find(m[1]));
   m = h.match(/^r-(.+)$/); if (m) { const r = find(m[1]); if (r) return renderDetail(r); }
   renderList();
 }
-function currentView() { const h = location.hash; return h === "#new" || /^#edit-/.test(h) ? "form" : /^#map-/.test(h) ? "map" : /^#r-/.test(h) ? "detail" : "list"; }
+function currentView() { const h = location.hash; return h === "#new" || /^#(edit|copy)-/.test(h) ? "form" : /^#map-/.test(h) ? "map" : /^#r-/.test(h) ? "detail" : "list"; }
 function go(h) { if (location.hash === "#" + h || (!h && !location.hash)) route(); else location.hash = h; window.scrollTo(0, 0); }
 window.addEventListener("hashchange", () => { route(); window.scrollTo(0, 0); });
 
@@ -321,7 +322,7 @@ function renderDetail(r) {
   let html = '<div class="back" style="display:flex;gap:8px;align-items:center"><button class="btn small" id="back">← 一覧へ</button>' + statusHtml() + '</div>' +
     '<div class="hero">' + (t ? '<img id="heroimg" src="' + t + '" alt="">' : '<div class="ph">' + MTN + '</div>') + '</div>' +
     '<div class="dhead"><div><h2>' + esc(r.mountain || "（山名なし）") + '</h2><div class="rt">' + esc(r.route || "") + '</div></div><div class="spacer"></div>' + lvBadge(r.level) +
-    '<button class="btn small" id="edit">✎ 編集</button></div>' +
+    '<button class="btn small" id="copy">⧉ 複製</button><button class="btn small" id="edit">✎ 編集</button></div>' +
     (r.area ? '<div class="muted">📍 ' + esc(r.area) + '</div>' : '') +
     (r.plan ? '<div class="planbox"><div>📌 次に行く予定：<b>' + esc(planDateText(r.plan)) + '</b> ' + planWhen(r.plan) + (r.plan.memo ? '<div class="muted">' + esc(r.plan.memo) + '</div>' : '') + '</div><button class="btn small" id="plan">変更</button></div>'
       : '<button class="btn small" id="plan" style="margin-top:10px">📌 次に行く予定に入れる</button>') +
@@ -333,12 +334,13 @@ function renderDetail(r) {
   if (r.caution) html += '<div class="sec warn"><h3>⚠️ 注意点</h3><div class="pre">' + esc(r.caution) + '</div></div>';
   html += '<div class="sec"><h3>🧭 オフライン地図</h3><div class="chips" style="margin-bottom:8px">' + mapBadge(r) + (r.gpx ? '<span class="chip">GPXルートあり</span>' : '') + '</div><button class="btn primary small" id="omap">🗺 地図を開く</button> <span class="muted" style="font-size:12px">国土地理院の地図を保存して、圏外でも現在地を確認できます</span></div>';
   html += '<div class="sec"><h3>🗺 地図・写真</h3>' + (maps.length ? '<div class="gallery">' + maps.map((m, i) => '<figure><img loading="lazy" data-i="' + (i + (r.thumb ? 1 : 0)) + '" src="' + imgSrc(m.img) + '" alt="">' + (m.caption ? '<figcaption>' + esc(m.caption) + '</figcaption>' : '') + '</figure>').join("") + '</div>' : '<div class="muted">まだ画像がありません</div>') + '</div>';
-  html += '<div class="sec"><h3>🔗 参考リンク</h3>' + (urls.length ? '<ul class="links">' + urls.map(u => { const href = safeUrl(u.url); const yt = /youtu\.?be/i.test(href); return '<li><a href="' + esc(href) + '" target="_blank" rel="noopener">' + (yt ? "▶️" : "🌐") + ' <span class="lbl">' + esc(u.label || href) + '</span></a>' + (u.label ? ' <span class="u">' + esc(href) + '</span>' : '') + '</li>'; }).join("") + '</ul>' : '<div class="muted">リンクなし</div>') + '</div>';
+  html += '<div class="sec"><h3>🔗 参考リンク</h3>' + (urls.length ? '<ul class="links">' + urls.map(u => { const href = safeUrl(u.url); const yt = /youtu\.?be/i.test(href); return '<li><a href="' + esc(href) + '" target="_blank" rel="noopener">' + (yt ? "▶️" : "🌐") + ' <span class="lbl">' + esc(u.label || href) + '</span></a>' + '</li>'; }).join("") + '</ul>' : '<div class="muted">リンクなし</div>') + '</div>';
   html += '<div class="sec"><h3>📝 備考</h3>' + (r.memo ? '<div class="pre">' + esc(r.memo) + '</div>' : '<div class="muted">—</div>') + '</div>';
   html += '<div class="muted" style="font-size:12px;text-align:right">最終更新：' + (r.updated ? new Date(r.updated).toLocaleDateString("ja-JP") : "—") + '</div>';
   app.innerHTML = html;
   document.getElementById("back").onclick = () => go("");
   document.getElementById("edit").onclick = () => go("edit-" + r.id);
+  document.getElementById("copy").onclick = () => go("copy-" + r.id);
   document.getElementById("plan").onclick = () => planEditor(r);
   document.getElementById("omap").onclick = () => go("map-" + r.id);
   document.getElementById("cadd").onclick = () => {
@@ -366,16 +368,23 @@ function openLb(i) {
 }
 
 /* ---------- form ---------- */
-function renderForm(orig) {
+// 複製：ルート固有のもの（登頂記録・予定・GPX・保存した地図）以外をコピー
+function copyOf(src) {
+  const c = JSON.parse(JSON.stringify(src));
+  c.id = uid(); c.climbs = []; c.plan = null; c.gpx = null; c.mapArea = null; delete c.updated;
+  c.route = (c.route || "") + "（コピー）";
+  return c;
+}
+function renderForm(orig, src) {
   pendingImgs = {};
-  const r = orig ? JSON.parse(JSON.stringify(orig)) : { id: uid(), mountain: "", route: "", area: "", level: "", time: "", distance: "", elevation: "", parking: "", parkingMap: "", parkingFee: "", urls: [], caution: "", memo: "", thumb: null, maps: [], climbs: [] };
+  const r = orig ? JSON.parse(JSON.stringify(orig)) : src ? copyOf(src) : { id: uid(), mountain: "", route: "", area: "", level: "", time: "", distance: "", elevation: "", parking: "", parkingMap: "", parkingFee: "", urls: [], caution: "", memo: "", thumb: null, maps: [], climbs: [] };
   if (!r.urls || !r.urls.length) r.urls = [{ label: "", url: "" }];
   if (!r.maps) r.maps = [];
   const mountains = [...new Set(routes.map(x => x.mountain).filter(Boolean))];
   const inp = (k, label, ph, type) => '<div class="f"><label>' + label + '</label><input data-k="' + k + '" ' + (type ? 'type="' + type + '" step="0.1" inputmode="decimal"' : '') + ' value="' + esc(r[k]) + '" placeholder="' + esc(ph || "") + '"' + (k === "mountain" ? ' list="mlist"' : '') + '></div>';
   const ta = (k, label, ph) => '<div class="f"><label>' + label + '</label><textarea data-k="' + k + '" placeholder="' + esc(ph || "") + '">' + esc(r[k]) + '</textarea></div>';
   app.innerHTML = '<div class="back"><button class="btn small" id="cancel0">← 戻る</button></div>' +
-    '<div class="form"><h2>' + (orig ? "ルートを編集" : "ルートを追加") + '</h2>' +
+    '<div class="form"><h2>' + (orig ? "ルートを編集" : src ? "ルートを複製" : "ルートを追加") + '</h2>' + (src ? '<p class="muted" style="margin-top:-8px;font-size:13px">「' + esc(src.mountain || "") + ' ' + esc(src.route || "") + '」の内容をコピーしました。違うところだけ直して保存してください。（登頂記録・予定・GPX・保存した地図はコピーされません）</p>' : '') +
     '<datalist id="mlist">' + mountains.map(m => '<option value="' + esc(m) + '">').join("") + '</datalist>' +
     '<div class="row">' + inp("mountain", "山の名前 *", "例：金剛山") + inp("route", "ルート名", "例：千早本道") + '</div>' +
     '<div class="row">' + inp("area", "エリア・登山口", "例：大阪府 千早赤阪村／まつまさ前") +
@@ -436,7 +445,7 @@ function renderForm(orig) {
   document.getElementById("addurl").onclick = () => { r.urls.push({ label: "", url: "" }); drawUrls(); };
   drawThumb(); drawMaps(); drawUrls();
 
-  const leave = () => { pendingImgs = {}; go(orig ? "r-" + orig.id : ""); };
+  const leave = () => { pendingImgs = {}; go(orig ? "r-" + orig.id : src ? "r-" + src.id : ""); };
   document.getElementById("cancel").onclick = leave; document.getElementById("cancel0").onclick = leave;
   document.getElementById("save").onclick = () => {
     if (!String(r.mountain).trim()) { toast("山の名前を入力してください"); document.querySelector('[data-k="mountain"]').focus(); return; }
