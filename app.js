@@ -145,9 +145,25 @@ function renderLogin() {
 }
 
 /* ---------- list ---------- */
+/* ---------- 登り・下りの使い分け ---------- */
+// use: "both"（登り下りどちらも・初期値） / "up"（登りのみ） / "down"（下山専用）
+const USE_LABEL = { both: "登り・下りどちらも", up: "登りのみ", down: "下山専用" };
+function isDown(r) { return r && r.use === "down"; }
+function downUses(r) { // このルートを下山に使った記録（登りのルート側の登頂記録から集める）
+  const out = [];
+  routes.forEach(x => (x.climbs || []).forEach(c => { if (c.down === r.id) out.push({ date: c.date, memo: c.memo, from: x }); }));
+  return out.sort((a, b) => a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+}
+function usedCount(r) { return (r.climbs || []).length + downUses(r).length; }
+function downName(id) { const d = find(id); return d ? (d.route || d.mountain || "（名前なし）") : "（削除したルート）"; }
+function downSelect(r, selected, id) {
+  const opts = routes.filter(x => x.id !== r.id && x.use !== "up" && (x.mountain || "") === (r.mountain || ""))
+    .sort((a, b) => (b.use === "down") - (a.use === "down") || (a.route || "").localeCompare(b.route || "", "ja"));
+  return '<select id="' + id + '"><option value="">↓ 同じ道を下る</option>' + opts.map(x => '<option value="' + esc(x.id) + '"' + (selected === x.id ? " selected" : "") + '>↓ ' + esc(x.route || "（名前なし）") + (x.use === "down" ? "（下山専用）" : "") + '</option>').join("") + '</select>';
+}
 function summaryHtml() {
   let total = 0, routesDone = 0; const mts = {};
-  routes.forEach(r => { const c = (r.climbs || []).length; total += c; if (c) { routesDone++; mts[r.mountain || ""] = 1; } });
+  routes.forEach(r => { const c = (r.climbs || []).length; total += c; if (c) mts[r.mountain || ""] = 1; if (usedCount(r)) routesDone++; });
   if (!routes.length) return "";
   return '<div class="summary"><div class="s"><b>' + total + '</b>回 登頂</div><div class="s"><b>' + Object.keys(mts).length + '</b>山 登頂済み</div><div class="s"><b>' + routesDone + '</b>/' + routes.length + ' ルート踏破</div></div>';
 }
@@ -173,9 +189,10 @@ function planWhen(p) {
   return '<span class="when past">予定日を過ぎています</span>';
 }
 function setPlan(r, plan) { const nr = JSON.parse(JSON.stringify(r)); nr.plan = plan; nr.updated = Date.now(); writeRoute(nr); }
-function addClimb(r, date, memo, clearPlan) {
+function addClimb(r, date, memo, clearPlan, down) {
   const nr = JSON.parse(JSON.stringify(r));
-  nr.climbs = (nr.climbs || []).concat([{ id: uid(), date, memo: memo || "" }]);
+  const c = { id: uid(), date, memo: memo || "" }; if (down) c.down = down;
+  nr.climbs = (nr.climbs || []).concat([c]);
   // 予定日当日以降の登頂を記録したら、予定は自動で外す
   if (nr.plan && (clearPlan || !nr.plan.date || nr.plan.date <= date)) nr.plan = null;
   nr.updated = Date.now(); writeRoute(nr);
@@ -186,12 +203,13 @@ function planEditor(r, onDone) {
   const m = document.createElement("div"); m.className = "modal";
   m.innerHTML = '<div class="box"><h3 style="margin-top:0">📌 次に行く予定</h3><p class="muted" style="margin-top:-6px">' + esc(r.mountain || "") + '　' + esc(r.route || "") + '</p>' +
     '<div class="f"><label>行く日（未定なら空欄）</label><input type="date" id="pd" value="' + esc(p.date || "") + '"></div>' +
+    '<div class="f"><label>下山ルート</label>' + downSelect(r, p.descent || "", "pdown") + '<div class="muted" style="font-size:12px">同じ山の「下山専用」などのルートから選べます</div></div>' +
     '<div class="f"><label>メモ（任意）</label><input type="text" id="pm" value="' + esc(p.memo || "") + '" placeholder="例：7時 登山口集合／〇〇さんと"></div>' +
     '<div class="actions">' + (r.plan ? '<button class="btn danger" id="prm" style="margin-right:auto">予定を外す</button>' : '') + '<button class="btn" id="pcn">キャンセル</button><button class="btn primary" id="pok">決定</button></div></div>';
   document.body.appendChild(m);
   m.onclick = ev => { if (ev.target === m) m.remove(); };
   m.querySelector("#pcn").onclick = () => m.remove();
-  m.querySelector("#pok").onclick = () => { setPlan(r, { date: m.querySelector("#pd").value || "", memo: m.querySelector("#pm").value.trim() }); m.remove(); toast("次に行く予定に入れました"); if (onDone) onDone(); };
+  m.querySelector("#pok").onclick = () => { const dsc = m.querySelector("#pdown").value; const np = { date: m.querySelector("#pd").value || "", memo: m.querySelector("#pm").value.trim() }; if (dsc) np.descent = dsc; setPlan(r, np); m.remove(); toast("次に行く予定に入れました"); if (onDone) onDone(); };
   const rm = m.querySelector("#prm"); if (rm) rm.onclick = () => { setPlan(r, null); m.remove(); toast("予定を外しました"); };
 }
 function nextCard(r) {
@@ -200,13 +218,24 @@ function nextCard(r) {
   const maps = (r.maps || []).slice(0, 4);
   return '<article class="next" data-id="' + esc(r.id) + '">' +
     '<div class="nhead">' + (t ? '<img src="' + t + '" alt="">' : '<div class="nph">' + MTN + '</div>') +
-    '<div class="ninfo"><div class="ndate">📌 ' + esc(planDateText(p)) + ' ' + planWhen(p) + '</div><div class="nmt">' + esc(r.mountain || "") + '</div><div class="nrt">' + esc(r.route || "") + '</div>' + (p.memo ? '<div class="nmemo">' + esc(p.memo) + '</div>' : '') + '</div></div>' +
+    '<div class="ninfo"><div class="ndate">📌 ' + esc(planDateText(p)) + ' ' + planWhen(p) + '</div><div class="nmt">' + esc(r.mountain || "") + '</div><div class="nrt">' + (p.descent ? '↑ ' : '') + esc(r.route || "") + '</div>' + (p.descent ? '<div class="nrt">↓ ' + esc(downName(p.descent)) + '</div>' : '') + (p.memo ? '<div class="nmemo">' + esc(p.memo) + '</div>' : '') + '</div></div>' +
     '<div class="chips" style="margin:10px 0">' + chips + '</div>' +
     (r.parking || murl ? '<div class="nrow"><span class="k">🅿️ 駐車場</span><span>' + (murl ? '<a href="' + esc(murl) + '" target="_blank" rel="noopener">' + esc(r.parking || "地図を見る") + ' 📍</a>' : esc(r.parking)) + (r.parkingFee ? '<span class="muted">（' + esc(r.parkingFee) + '）</span>' : '') + '</span></div>' : '') +
     (r.area ? '<div class="nrow"><span class="k">📍 エリア</span><span>' + esc(r.area) + '</span></div>' : '') +
     (r.caution ? '<div class="ncaution"><b>⚠️ 注意点</b><div class="pre">' + esc(r.caution) + '</div></div>' : '') +
     (maps.length ? '<div class="nmaps">' + maps.map(m => '<img src="' + imgSrc(m.img) + '" alt="" data-open="' + esc(r.id) + '">').join("") + '</div>' : '') +
+    descentBlock(p.descent) +
     '<div class="nactions">' + (areaOnDevice(r.id) ? '' : (r.mapArea || r.gpx ? '<span class="warnchip chip">地図未保存</span>' : '')) + '<button class="btn small" data-act="map">🗺 地図</button><button class="btn small" data-act="detail">詳細を見る</button><button class="btn small" data-act="edit">予定を変更</button><button class="btn primary small" data-act="climb">✓ 登頂を記録</button></div></article>';
+}
+function descentBlock(id) {
+  if (!id) return "";
+  const d = find(id); if (!d) return '<div class="ndown"><b>↓ 下山ルート</b>：削除されたルートです</div>';
+  const chips = [d.level ? lvBadge(d.level) : "", d.time ? '<span class="chip">⏱ ' + esc(d.time) + '</span>' : "", d.distance ? '<span class="chip">↔ ' + esc(d.distance) + ' km</span>' : ""].join("");
+  const maps = (d.maps || []).slice(0, 4);
+  return '<div class="ndown"><div class="ndh"><b>↓ 下山：' + esc(d.route || "") + '</b><button class="btn small" data-act="ddetail" data-did="' + esc(d.id) + '">詳細</button></div>' +
+    (chips ? '<div class="chips" style="margin:6px 0">' + chips + '</div>' : '') +
+    (d.caution ? '<div class="ncaution"><b>⚠️ 下山の注意点</b><div class="pre">' + esc(d.caution) + '</div></div>' : '') +
+    (maps.length ? '<div class="nmaps">' + maps.map(m => '<img src="' + imgSrc(m.img) + '" alt="">').join("") + '</div>' : '') + '</div>';
 }
 function nextHtml() {
   const ps = planned();
@@ -218,12 +247,13 @@ function bindNext() {
     const r = find(el.dataset.id); if (!r) return;
     el.querySelector('[data-act="detail"]').onclick = () => go("r-" + r.id);
     el.querySelector('[data-act="map"]').onclick = () => go("map-" + r.id);
+    const dd = el.querySelector('[data-act="ddetail"]'); if (dd) dd.onclick = () => go("r-" + dd.dataset.did);
     el.querySelector('[data-act="edit"]').onclick = () => planEditor(r);
     el.querySelector('[data-act="climb"]').onclick = () => {
       const d = r.plan && r.plan.date && r.plan.date <= today() ? r.plan.date : today();
-      confirmBox(fmtDate(d) + " に登頂したと記録しますか？（予定は外れます）", () => addClimb(r, d, "", true), "記録する", true);
+      confirmBox(fmtDate(d) + " に登頂したと記録しますか？" + (r.plan && r.plan.descent ? "\n（下山：" + downName(r.plan.descent) + "）" : "") + "\n予定は外れます。", () => addClimb(r, d, "", true, r.plan && r.plan.descent), "記録する", true);
     };
-    const imgs = [...el.querySelectorAll(".nmaps img")];
+    const imgs = [...el.querySelectorAll(".nmaps img")]; // 登り・下りの画像をまとめて拡大表示
     imgs.forEach((im, i) => { im.onclick = () => { lbList = imgs.map(x => x.src); openLb(i); }; });
   });
 }
@@ -234,17 +264,19 @@ function card(r) {
   const chips = [];
   if (r.time) chips.push('<span class="chip">⏱ ' + esc(shortTime(r.time)) + '</span>');
   if (r.distance) chips.push('<span class="chip">↔ ' + esc(r.distance) + ' km</span>');
-  const cl = climbsOf(r); if (cl.length) chips.push('<span class="chip">最終 ' + esc(fmtDate(cl[0].date)) + '</span>');
+  const cl = climbsOf(r), du = isDown(r) ? downUses(r) : [];
+  const last = isDown(r) ? (du[0] && du[0].date) : (cl[0] && cl[0].date);
+  if (last) chips.push('<span class="chip">最終 ' + esc(fmtDate(last)) + '</span>');
   const t = imgSrc(r.thumb);
   return '<button class="card" data-id="' + esc(r.id) + '"><div class="thumb">' + (t ? '<img loading="lazy" src="' + t + '" alt="">' : '<div class="ph">' + MTN + '</div>') +
-    (r.level ? '<span class="badge-on">' + lvBadge(r.level) + '</span>' : '') + (r.plan ? '<span class="pin">📌 ' + esc(r.plan.date ? fmtDate(r.plan.date).slice(5) : "予定") + '</span>' : '') + (cl.length ? '<span class="done">✓<span class="dl"> 登頂</span> ' + cl.length + '<span class="dl">回</span></span>' : '') + '</div>' +
+    ((r.level || isDown(r)) ? '<span class="badge-on">' + (isDown(r) ? '<span class="lv lvdown">↓ 下山用</span> ' : '') + lvBadge(r.level) + '</span>' : '') + (du.length ? '<span class="done">↓<span class="dl"> 下山</span> ' + du.length + '<span class="dl">回</span></span>' : '') + (r.plan ? '<span class="pin">📌 ' + esc(r.plan.date ? fmtDate(r.plan.date).slice(5) : "予定") + '</span>' : '') + (cl.length ? '<span class="done">✓<span class="dl"> 登頂</span> ' + cl.length + '<span class="dl">回</span></span>' : '') + '</div>' +
     '<div class="body"><div class="mt">' + esc(r.mountain || "（山名なし）") + '</div><div class="rt">' + esc(r.route || "") + (r.area ? '　<span class="muted">' + esc(r.area) + '</span>' : '') + '</div><div class="chips">' + chips.join("") + '</div></div></button>';
 }
 function renderList() {
   const q = ui.q.trim().toLowerCase();
   const list = routes.filter(r => {
     if (ui.lv && r.level !== ui.lv) return false;
-    const c = (r.climbs || []).length; if (ui.done === "done" && !c) return false; if (ui.done === "not" && c) return false;
+    const c = usedCount(r); if (ui.done === "done" && !c) return false; if (ui.done === "not" && c) return false;
     if (!q) return true;
     return [r.mountain, r.route, r.area, r.parking, r.caution, r.memo].join(" ").toLowerCase().indexOf(q) >= 0;
   });
@@ -324,13 +356,18 @@ function renderDetail(r) {
     '<div class="dhead"><div><h2>' + esc(r.mountain || "（山名なし）") + '</h2><div class="rt">' + esc(r.route || "") + '</div></div><div class="spacer"></div>' + lvBadge(r.level) +
     '<button class="btn small" id="copy">⧉ 複製</button><button class="btn small" id="edit">✎ 編集</button></div>' +
     (r.area ? '<div class="muted">📍 ' + esc(r.area) + '</div>' : '') +
-    (r.plan ? '<div class="planbox"><div>📌 次に行く予定：<b>' + esc(planDateText(r.plan)) + '</b> ' + planWhen(r.plan) + (r.plan.memo ? '<div class="muted">' + esc(r.plan.memo) + '</div>' : '') + '</div><button class="btn small" id="plan">変更</button></div>'
+    (isDown(r) ? '<div class="planbox"><div>↓ <b>下山専用ルート</b><div class="muted" style="font-size:13px">登りのルートで「次に行く予定」や「登頂記録」を付けるときに、下山ルートとして選べます。</div></div></div>' : r.plan ? '<div class="planbox"><div>📌 次に行く予定：<b>' + esc(planDateText(r.plan)) + '</b> ' + planWhen(r.plan) + (r.plan.descent ? '<div>↓ 下山：' + esc(downName(r.plan.descent)) + '</div>' : '') + (r.plan.memo ? '<div class="muted">' + esc(r.plan.memo) + '</div>' : '') + '</div><button class="btn small" id="plan">変更</button></div>'
       : '<button class="btn small" id="plan" style="margin-top:10px">📌 次に行く予定に入れる</button>') +
     '<div class="stats">' + stat("難易度", r.level) + stat("所要時間", r.time) + stat("距離", r.distance, " km") + (r.elevation ? stat("標高差・累積標高", r.elevation) : "") + parkingStat(r) + stat("駐車料金", r.parkingFee) + '</div>';
-  const cl = climbsOf(r), mt = mountainTotal(r.mountain || "");
+  const cl = climbsOf(r), mt = mountainTotal(r.mountain || ""), du = downUses(r);
+  if (isDown(r)) {
+    html += '<div class="sec"><h3>↓ 下山の記録<span class="bigcount">このルートで下山 <b>' + du.length + '</b>回</span></h3>' +
+      (du.length ? '<ul class="climbs">' + du.map((c, i) => '<li><span class="n">' + (du.length - i) + '回目</span><span class="d">' + esc(fmtDate(c.date)) + '</span><span class="m">↑ ' + esc(c.from.route || "") + ' で登頂' + (c.memo ? '　' + esc(c.memo) : '') + '</span></li>').join("") + '</ul>' : '<div class="muted">まだ記録がありません。登りのルートで登頂を記録するときに、下山ルートとしてこのルートを選ぶとここに表示されます。</div>') + '</div>';
+  } else
   html += '<div class="sec"><h3>⛰ 登頂記録<span class="bigcount">このルート <b>' + cl.length + '</b>回' + (mt !== cl.length ? '　／　' + esc(r.mountain) + ' 合計 <b>' + mt + '</b>回' : '') + '</span></h3>' +
-    (cl.length ? '<ul class="climbs">' + cl.map((c, i) => '<li><span class="n">' + (cl.length - i) + '回目</span><span class="d">' + esc(fmtDate(c.date)) + '</span><span class="m">' + esc(c.memo || "") + '</span><button class="x" data-cid="' + esc(c.id) + '" aria-label="削除">×</button></li>').join("") + '</ul>' : '<div class="muted">まだ登頂記録がありません</div>') +
-    '<div class="addclimb"><input type="date" id="cdate" value="' + today() + '"><input type="text" id="cmemo" placeholder="ひとこと（天気・一緒に行った人など）"><button class="btn primary small" id="cadd">＋ 登頂を記録</button></div></div>';
+    (du.length ? '<div class="muted" style="font-size:13px;margin:-4px 0 6px">↓ ほかのルートから登って、このルートで下山：' + du.length + '回</div>' : '') +
+    (cl.length ? '<ul class="climbs">' + cl.map((c, i) => '<li><span class="n">' + (cl.length - i) + '回目</span><span class="d">' + esc(fmtDate(c.date)) + '</span><span class="m">' + (c.down ? '<span class="downtag">↓ ' + esc(downName(c.down)) + '</span> ' : '') + esc(c.memo || "") + '</span><button class="x" data-cid="' + esc(c.id) + '" aria-label="削除">×</button></li>').join("") + '</ul>' : '<div class="muted">まだ登頂記録がありません</div>') +
+    '<div class="addclimb"><input type="date" id="cdate" value="' + today() + '"><input type="text" id="cmemo" placeholder="ひとこと（天気・一緒に行った人など）">' + downSelect(r, r.plan && r.plan.descent || "", "cdown") + '<button class="btn primary small" id="cadd">＋ 登頂を記録</button></div></div>';
   if (r.caution) html += '<div class="sec warn"><h3>⚠️ 注意点</h3><div class="pre">' + esc(r.caution) + '</div></div>';
   html += '<div class="sec"><h3>🧭 オフライン地図</h3><div class="chips" style="margin-bottom:8px">' + mapBadge(r) + (r.gpx ? '<span class="chip">GPXルートあり</span>' : '') + '</div><button class="btn primary small" id="omap">🗺 地図を開く</button> <span class="muted" style="font-size:12px">国土地理院の地図を保存して、圏外でも現在地を確認できます</span></div>';
   html += '<div class="sec"><h3>🗺 地図・写真</h3>' + (maps.length ? '<div class="gallery">' + maps.map((m, i) => '<figure><img loading="lazy" data-i="' + (i + (r.thumb ? 1 : 0)) + '" src="' + imgSrc(m.img) + '" alt="">' + (m.caption ? '<figcaption>' + esc(m.caption) + '</figcaption>' : '') + '</figure>').join("") + '</div>' : '<div class="muted">まだ画像がありません</div>') + '</div>';
@@ -341,11 +378,11 @@ function renderDetail(r) {
   document.getElementById("back").onclick = () => go("");
   document.getElementById("edit").onclick = () => go("edit-" + r.id);
   document.getElementById("copy").onclick = () => go("copy-" + r.id);
-  document.getElementById("plan").onclick = () => planEditor(r);
+  const pb = document.getElementById("plan"); if (pb) pb.onclick = () => planEditor(r);
   document.getElementById("omap").onclick = () => go("map-" + r.id);
-  document.getElementById("cadd").onclick = () => {
+  const ca = document.getElementById("cadd"); if (ca) ca.onclick = () => {
     const d = document.getElementById("cdate").value; if (!d) { toast("日付を選んでください"); return; }
-    addClimb(r, d, document.getElementById("cmemo").value.trim());
+    addClimb(r, d, document.getElementById("cmemo").value.trim(), false, document.getElementById("cdown").value);
   };
   app.querySelectorAll(".climbs .x").forEach(b => { b.onclick = () => {
     const c = (r.climbs || []).find(x => x.id === b.dataset.cid); if (!c) return;
@@ -388,6 +425,7 @@ function renderForm(orig, src) {
     '<datalist id="mlist">' + mountains.map(m => '<option value="' + esc(m) + '">').join("") + '</datalist>' +
     '<div class="row">' + inp("mountain", "山の名前 *", "例：金剛山") + inp("route", "ルート名", "例：千早本道") + '</div>' +
     '<div class="row">' + inp("area", "エリア・登山口", "例：大阪府 千早赤阪村／まつまさ前") +
+    '<div class="f"><label>このルートの使い方</label><select data-k="use">' + Object.keys(USE_LABEL).map(k => '<option value="' + k + '"' + ((r.use || "both") === k ? " selected" : "") + '>' + USE_LABEL[k] + '</option>').join("") + '</select></div>' +
     '<div class="f"><label>難易度</label><select data-k="level"><option value="">—</option>' + LEVELS.map(l => '<option' + (r.level === l ? " selected" : "") + '>' + l + '</option>').join("") + '</select></div></div>' +
     '<div class="row">' + inp("time", "所要時間", "例：上り 1:30 / 下り 1:00") + inp("distance", "距離（km）", "例：5.6", "number") + inp("elevation", "標高差・累積標高（任意）", "例：+600m") + '</div>' +
     '<div class="row">' + inp("parking", "駐車場", "例：登山口近くの有料駐車場") + inp("parkingFee", "駐車料金", "例：1日 600円") + '</div>' +
@@ -621,6 +659,11 @@ function renderMap(r) {
     L.circleMarker(r.gpx.pts[0], { radius: 7, color: "#fff", weight: 2, fillColor: "#2f5d45", fillOpacity: 1 }).addTo(map).bindTooltip("スタート");
     L.circleMarker(r.gpx.pts[r.gpx.pts.length - 1], { radius: 7, color: "#fff", weight: 2, fillColor: "#a33b3b", fillOpacity: 1 }).addTo(map).bindTooltip("ゴール");
     map.fitBounds(line.getBounds(), { padding: [30, 30] }); fitted = true;
+  }
+  const dsc = r.plan && r.plan.descent && find(r.plan.descent);
+  if (dsc && dsc.gpx && dsc.gpx.pts && dsc.gpx.pts.length) {
+    const dl = L.polyline(dsc.gpx.pts, { color: "#7b4bb7", weight: 5, opacity: .8, dashArray: "10 8" }).addTo(map).bindTooltip("↓ 下山：" + esc(dsc.route || ""));
+    if (fitted) map.fitBounds(map.getBounds().extend(dl.getBounds()), { padding: [30, 30] }); else { map.fitBounds(dl.getBounds(), { padding: [30, 30] }); fitted = true; }
   }
   (r.gpx && r.gpx.wpts || []).forEach(w => L.circleMarker([w.lat, w.lng], { radius: 5, color: "#fff", weight: 2, fillColor: "#d19a1f", fillOpacity: 1 }).addTo(map).bindTooltip(esc(w.name || ""), { permanent: !!w.name, direction: "top", className: "wptip" }));
 

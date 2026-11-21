@@ -217,3 +217,10 @@ body.mapmode{overflow:hidden}
 .modal .box p{white-space:pre-line}
 body.mapmode .toast{bottom:130px}
 @media (min-width:700px){.msearch{flex:1 1 260px}}
+
+/* 下山ルート */
+.lvdown{background:#7b4bb7}
+.downtag{display:inline-block;background:#efe6f8;color:#5d3591;border-radius:99px;font-size:12px;padding:0 8px}
+.ndown{border-top:2px dashed #d9c8ee;margin-top:10px;padding-top:10px}
+.ndh{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#5d3591}
+.addclimb select{border:1px solid var(--line);border-radius:10px;padding:7px 10px;background:#fcfbf8;max-width:100%}
